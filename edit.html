@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bearbeiten – Kundenverwaltung</title>
+  <link rel="stylesheet" href="assets/css/base.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand"><div class="logo"></div><div><h1>Bearbeiten</h1><div class="hint">Adressen werden als echte Felder erfasst. IDs werden intern ermittelt.</div></div></div>
+      <nav class="nav">
+        <a href="index.html" data-active="overview">Übersicht</a>
+        <a href="find.html" data-active="find">Suche</a>
+        <a href="edit.html" data-active="edit" class="active">Bearbeiten</a>
+      </nav>
+    </header>
+
+    <section class="card">
+      <div class="head"><h2>Kunde</h2><span class="hint">ID wird beim Erstellen automatisch vergeben.</span></div>
+      <div class="body">
+        <form id="custForm" novalidate>
+          <div class="row">
+            <div><label for="custId">ID</label><input id="custId" class="input" placeholder="(neu/readonly)" readonly></div>
+            <div><label for="custName">Name *</label><input id="custName" class="input" required placeholder="Vor- und Nachname/Firma"></div>
+          </div>
+          <div class="row">
+            <div><label for="custEmail">Email *</label><input id="custEmail" class="input" required type="email" placeholder="kunde@example.ch" autocomplete="email"></div>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="split">
+      <div class="card">
+        <div class="head"><h2>Adresse (Delivery)</h2></div>
+        <div class="body">
+          <form id="addrForm">
+            <div class="row">
+              <div><label for="aStreet">StreetNr *</label><input id="aStreet" class="input" required></div>
+              <div><label for="aZIP">ZIP *</label><input id="aZIP" class="input" required></div>
+            </div>
+            <div class="row">
+              <div><label for="aCity">City *</label><input id="aCity" class="input" required></div>
+              <div>
+                <label for="aCountryId">Country *</label>
+                <select id="aCountryId" class="input"><option value="">–</option></select>
+              </div>
+            </div>
+            <input id="aId" type="hidden">
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>Rechnungsadresse (Billing)</h2></div>
+        <div class="body">
+          <form id="billForm">
+            <div class="row">
+              <div><label for="bStreet">StreetNr *</label><input id="bStreet" class="input" required></div>
+              <div><label for="bZIP">ZIP *</label><input id="bZIP" class="input" required></div>
+            </div>
+            <div class="row">
+              <div><label for="bCity">City *</label><input id="bCity" class="input" required></div>
+              <div>
+                <label for="bCountryId">Country *</label>
+                <select id="bCountryId" class="input"><option value="">–</option></select>
+              </div>
+            </div>
+            <input id="bId" type="hidden">
+            <div class="hint" style="margin-top:8px">
+              <button class="btn ghost" type="button" id="copyAddr">Rechnungsadresse = Lieferadresse</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Aktionen</h2></div>
+      <div class="body" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn ok" id="btnCreate">Erstellen (Adressen → Customer)</button>
+        <button class="btn warn" id="btnUpdate">Aktualisieren</button>
+        <button class="btn danger" id="btnDelete">Löschen (Customer)</button>
+      </div>
+    </section>
+
+    <footer><span class="badge">Seite 3/3</span></footer>
+  </div>
+
+  <script type="module">
+    import {API} from './assets/js/api.js';
+    import {$,el,nav,getParam,extractId,toast,confirmDialog} from './assets/js/common.js';
+    nav('edit');
+
+    let busy=false, dirty=false;
+    document.addEventListener('input', ()=>dirty=true);
+    window.addEventListener('beforeunload', e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
+
+    function validateAddr(prefix){
+      const s=$('#'+prefix+'Street').value.trim(), z=$('#'+prefix+'ZIP').value.trim(), c=$('#'+prefix+'City').value.trim(), co=$('#'+prefix+'CountryId').value.trim();
+      if(!s||!z||!c||!co) return 'Bitte alle Felder der '+(prefix==='a'?'Adresse':'Rechnungsadresse')+' ausfüllen.'; return null;
+    }
+    function validateCustomer(){
+      const n=$('#custName').value.trim(); let e=$('#custEmail').value.trim().replace(/\s+/g,'');
+      if(!n) return 'Name ist erforderlich.'; if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return 'E-Mail ist ungültig.';
+      const ea=validateAddr('a'); if(ea) return ea; const eb=validateAddr('b'); if(eb) return eb; $('#custEmail').value=e; return null;
+    }
+    function lock(){ busy=true; ['btnCreate','btnUpdate','btnDelete'].forEach(id=>{const b=$('#'+id); if(b) b.disabled=true;}); }
+    function unlock(){ busy=false; ['btnCreate','btnUpdate','btnDelete'].forEach(id=>{const b=$('#'+id); if(b) b.disabled=false;}); }
+
+    async function upsertAddress(prefix){
+      const id=$('#'+prefix+'Id').value.trim();
+      const payload={ StreetNr:$('#'+prefix+'Street').value.trim(), ZIP:$('#'+prefix+'ZIP').value.trim(), City:$('#'+prefix+'City').value.trim(), CountryID:$('#'+prefix+'CountryId').value.trim() };
+      if(id){ await API.updateSmart('Address/'+id, { ID:Number(id), ...payload }); return Number(id); }
+      const created = await API.post('Address', payload); const newId = extractId(created); if(!newId) throw new Error('Address-ID nicht erhalten.');
+      $('#'+prefix+'Id').value=newId; return Number(newId);
+    }
+
+    async function createCustomer(){
+      if(busy) return; const err=validateCustomer(); if(err) return toast(err,'error');
+      try{
+        lock();
+        const addrId=await upsertAddress('a'); const billId=await upsertAddress('b');
+        const created=await API.post('Customer',{ Name:$('#custName').value.trim(), Email:$('#custEmail').value.trim(), AddressID:addrId, BillingAddressID:billId });
+        const newId=extractId(created); if(newId) $('#custId').value=newId;
+        dirty=false; toast('Kunde erstellt'+(newId?` (ID: ${newId})`:''),'success');
+      }catch(e){ toast(String(e.message),'error'); } finally{ unlock(); }
+    }
+
+    async function updateCustomer(){
+      if(busy) return;
+      const id=$('#custId').value.trim(); if(!/^\d+$/.test(id)) return toast('Für Update bitte zuerst einen Kunden laden/erstellen.','error');
+      const err=validateCustomer(); if(err) return toast(err,'error');
+      try{
+        lock();
+        const addrId=await upsertAddress('a'); const billId=await upsertAddress('b');
+        await API.updateSmart('Customer/'+id,{ ID:Number(id), Name:$('#custName').value.trim(), Email:$('#custEmail').value.trim(), AddressID:addrId, BillingAddressID:billId });
+        dirty=false; toast('Kunde aktualisiert','success');
+      }catch(e){ toast(String(e.message),'error'); } finally{ unlock(); }
+    }
+
+    async function deleteCustomer(){
+      if(busy) return;
+      const id=$('#custId').value.trim(); if(!/^\d+$/.test(id)) return toast('Bitte gültige Kunden-ID.','error');
+      const ok = await confirmDialog({title:'Löschen', body:`Kunden #${id} wirklich löschen?`, ok:'Löschen', cancel:'Abbrechen'}); if(!ok) return;
+      try{
+        lock(); await API.del('Customer/'+id);
+        toast('Kunde gelöscht.','success');
+        document.getElementById('custForm').reset(); document.getElementById('addrForm').reset(); document.getElementById('billForm').reset();
+        $('#custId').value=''; $('#aId').value=''; $('#bId').value=''; dirty=false;
+      }catch(e){ toast(String(e.message),'error'); } finally{ unlock(); }
+    }
+
+    async function preloadFromId(id){
+      const obj=await API.getOne('Customer/'+id); const c=obj?.resources?.[0] ?? obj?.resource ?? obj; if(!c) return;
+      $('#custId').value=c.ID ?? ''; $('#custName').value=c.Name ?? ''; $('#custEmail').value=c.Email ?? '';
+      if(c.AddressID){ const ao=await API.getOne('Address/'+c.AddressID); const a=ao?.resources?.[0] ?? ao?.resource ?? ao;
+        if(a){ $('#aId').value=a.ID ?? c.AddressID; $('#aStreet').value=a.StreetNr??''; $('#aZIP').value=a.ZIP??''; $('#aCity').value=a.City??''; $('#aCountryId').value=a.CountryID??''; } }
+      if(c.BillingAddressID){ const bo=await API.getOne('Address/'+c.BillingAddressID); const b=bo?.resources?.[0] ?? bo?.resource ?? bo;
+        if(b){ $('#bId').value=b.ID ?? c.BillingAddressID; $('#bStreet').value=b.StreetNr??''; $('#bZIP').value=b.ZIP??''; $('#bCity').value=b.City??''; $('#bCountryId').value=b.CountryID??''; } }
+      dirty=false;
+    }
+
+    async function loadCountries(){
+      try{
+        const list = await API.get('Country');
+        const opts = ['<option value="">–</option>'].concat(list.map(c=>`<option value="${c.ISO}">${c.ISO} – ${c.German}</option>`)).join('');
+        $('#aCountryId').innerHTML = opts; $('#bCountryId').innerHTML = opts;
+      }catch(e){ /* optional */ }
+    }
+
+    $('#copyAddr').addEventListener('click', ()=>{
+      $('#bStreet').value=$('#aStreet').value; $('#bZIP').value=$('#aZIP').value; $('#bCity').value=$('#aCity').value; $('#bCountryId').value=$('#aCountryId').value;
+      dirty=true; toast('Rechnungsadresse übernommen','info');
+    });
+
+    const pre=getParam('id'); if(pre){ preloadFromId(pre); }
+    loadCountries();
+
+    $('#btnCreate').addEventListener('click', createCustomer);
+    $('#btnUpdate').addEventListener('click', updateCustomer);
+    $('#btnDelete').addEventListener('click', deleteCustomer);
+  </script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suche – Kundenverwaltung</title>
+  <link rel="stylesheet" href="assets/css/base.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand"><div class="logo"></div><div><h1>Suche</h1><div class="hint">Suche nach Name & Adresse (Street/ZIP/City)</div></div></div>
+      <nav class="nav">
+        <a href="index.html" data-active="overview">Übersicht</a>
+        <a href="find.html" data-active="find" class="active">Suche</a>
+        <a href="edit.html" data-active="edit">Bearbeiten</a>
+      </nav>
+    </header>
+
+    <section class="card">
+      <div class="head"><h2>Suchformular</h2></div>
+      <div class="body">
+        <form id="searchForm">
+          <div class="row">
+            <div><label for="sName">Name/Email</label><input id="sName" class="input" placeholder="z. B. Müller oder mueller@example.ch"></div>
+            <div><label for="sStreet">StreetNr</label><input id="sStreet" class="input" placeholder="z. B. Hauptstrasse 5"></div>
+          </div>
+          <div class="row">
+            <div><label for="sZIP">PLZ</label><input id="sZIP" class="input" placeholder="8000"></div>
+            <div><label for="sCity">Ort</label><input id="sCity" class="input" placeholder="Zürich"></div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn primary" type="submit" id="btnSearch">Suchen</button>
+            <button class="btn ghost" type="button" id="reset">Filter löschen</button>
+          </div>
+        </form>
+        <div id="status" class="hint" style="margin-top:10px">Bereit.</div>
+        <div id="results" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <footer><span class="badge">Seite 2/3</span></footer>
+  </div>
+
+  <script type="module">
+    import {API} from './assets/js/api.js';
+    import {$,el,nav,getParam,toast,highlight} from './assets/js/common.js';
+    nav('find');
+
+    const statusEl=$('#status'); const setStatus=m=>statusEl.textContent=m;
+    const q=getParam('q'); if(q) $('#sName').value=q;
+
+    function match(row, name, street, zip, city){
+      const hay = {
+        name: (row.Name+' '+row.Email).toLowerCase(),
+        street: String(row.StreetNr||'').toLowerCase(),
+        zip: String(row.ZIP||'').toLowerCase(),
+        city: String(row.City||'').toLowerCase()
+      };
+      return (!name || hay.name.includes(name.toLowerCase())) &&
+             (!street || hay.street.includes(street.toLowerCase())) &&
+             (!zip || hay.zip.includes(zip.toLowerCase())) &&
+             (!city || hay.city.includes(city.toLowerCase()));
+    }
+    const chip = t => `<span class="chip">${t}</span>`;
+
+    async function handleSearch(ev){
+      ev?.preventDefault();
+      setStatus('Suche läuft…'); $('#results').innerHTML='';
+      try{
+        const name=$('#sName').value.trim(), street=$('#sStreet').value.trim(), zip=$('#sZIP').value.trim(), city=$('#sCity').value.trim();
+        const data = await API.get('CustomerView');
+        const res = data.filter(r=>match(r, name, street, zip, city));
+        const box = $('#results'); box.innerHTML='';
+        const chips=[name&&`Name: ${name}`, street&&`Strasse: ${street}`, zip&&`PLZ: ${zip}`, city&&`Ort: ${city}`].filter(Boolean).map(chip).join(' ');
+        if(chips) box.innerHTML += `<div style="margin-bottom:8px">${chips}</div>`;
+        if(!res.length){ box.innerHTML += '<div class="empty">Keine Treffer.</div>'; setStatus('Fertig – 0 Treffer.'); return; }
+        res.forEach(r=>{
+          const card = el('div',{className:'card'});
+          card.innerHTML = `
+            <div class="body">
+              <div style="display:grid;grid-template-columns:120px 1fr;gap:8px">
+                <div class="hint">ID</div><div>${r.ID}</div>
+                <div class="hint">Name</div><div>${highlight(r.Name||'', name)}</div>
+                <div class="hint">Email</div><div>${highlight(r.Email||'', name)}</div>
+                <div class="hint">Adresse</div><div>${highlight(r.StreetNr||'', street)}</div>
+                <div class="hint">PLZ / Ort</div><div>${highlight(r.ZIP||'', zip)} ${highlight(r.City||'', city)}</div>
+                <div class="hint">Land</div><div>${r.Country ?? '—'}</div>
+              </div>
+              <div style="margin-top:10px;display:flex;gap:10px">
+                <a class="btn" href="edit.html?id=${encodeURIComponent(r.ID)}">In Editor laden</a>
+                <a class="btn ghost" href="index.html">Zur Übersicht</a>
+              </div>
+            </div>`;
+          box.append(card);
+        });
+        setStatus('Fertig – '+res.length+' Treffer.'); toast(`${res.length} Treffer gefunden`,'success');
+      }catch(e){
+        setStatus(String(e.message)); $('#results').innerHTML='<div class="empty">Fehler bei der Suche.</div>'; toast('Suche fehlgeschlagen','error'); console.error(e);
+      }
+    }
+
+    $('#searchForm').addEventListener('submit', handleSearch);
+    $('#btnSearch').addEventListener('click', handleSearch);
+    $('#reset').addEventListener('click', ()=>{ $('#searchForm').reset(); $('#results').innerHTML=''; setStatus('Bereit.'); });
+    if(q){ handleSearch(); }
+  </script>
+</body>
+</html>

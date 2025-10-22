@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gesamtübersicht – Kundenverwaltung</title>
+  <link rel="stylesheet" href="assets/css/base.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>Gesamtübersicht</h1>
+          <div class="hint">Quelle: /CustomerView (read-only)</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="index.html" data-active="overview" class="active">Übersicht</a>
+        <a href="find.html" data-active="find">Suche</a>
+        <a href="edit.html" data-active="edit">Bearbeiten</a>
+      </nav>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <div class="head">
+          <h2>Alle Kunden</h2>
+          <div class="toolbar">
+            <input id="fQ" class="input" placeholder="Name/Email/Adresse/Ort/PLZ…">
+            <select id="pageSize" class="input">
+              <option value="10">10 / Seite</option>
+              <option value="20" selected>20 / Seite</option>
+              <option value="50">50 / Seite</option>
+              <option value="0">Alle</option>
+            </select>
+            <button id="reset" class="btn ghost">Filter zurücksetzen</button>
+            <button id="export" class="btn">CSV exportieren</button>
+            <button id="reload" class="btn">Neu laden</button>
+          </div>
+        </div>
+        <div class="body">
+          <div class="status"><span class="chip" id="count">0 Treffer</span><span id="status">Bereit.</span></div>
+          <div style="overflow:auto;margin-top:12px">
+            <table>
+              <thead>
+                <tr>
+                  <th data-sort="ID">ID</th>
+                  <th data-sort="Name">Name</th>
+                  <th data-sort="Email">Email</th>
+                  <th data-sort="StreetNr">Adresse</th>
+                  <th data-sort="ZIP">PLZ</th>
+                  <th data-sort="City">Ort</th>
+                  <th data-sort="Country">Land</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+          <div class="toolbar" style="justify-content:flex-end;margin-top:10px" id="pager"></div>
+        </div>
+      </div>
+
+      <div class="card" id="detailsCard">
+        <div class="head">
+          <h2>Details</h2>
+          <button class="btn ghost" id="toggleDetails" title="Details ein-/ausklappen">–</button>
+        </div>
+        <div class="body" id="details"><div class="empty">Wähle in der Tabelle.</div></div>
+      </div>
+    </section>
+
+    <footer><span class="badge">Seite 1/3</span></footer>
+  </div>
+
+  <script type="module">
+    import {API} from './assets/js/api.js';
+    import {$,$$,el,nav,csvDownload,debounce,storage,flagOf,skeletonRows,highlight,toast} from './assets/js/common.js';
+    nav('overview');
+
+    const state = { all: [], filtered: [], sort: {key:'ID', dir:'asc'}, page:1, pageSize:Number(storage.get('pageSize',20)) };
+    const rowsEl = $('#rows'), statusEl = $('#status'), countEl = $('#count'), pagerEl = $('#pager');
+    const setStatus = m => statusEl.textContent=m;
+
+    function drawTablePage(){
+      const {page,pageSize,filtered} = state;
+      let items = filtered;
+      if(pageSize>0){ const start=(page-1)*pageSize; items = filtered.slice(start,start+pageSize); }
+      rowsEl.innerHTML = '';
+      items.forEach(r=>{
+        const tr = el('tr');
+        const land = r.Country ? `${flagOf(r.Country)} ${r.Country}` : '';
+        tr.append(
+          el('td',{textContent:r.ID}),
+          el('td',{innerHTML:highlight(r.Name||'', $('#fQ').value.trim())}),
+          el('td',{innerHTML:highlight(r.Email||'', $('#fQ').value.trim())}),
+          el('td',{innerHTML:highlight(r.StreetNr||'', $('#fQ').value.trim())}),
+          el('td',{textContent:r.ZIP||''}),
+          el('td',{innerHTML:highlight(r.City||'', $('#fQ').value.trim())}),
+          el('td',{textContent:land}),
+          el('td',{}, el('div',{className:'row-actions'},
+            el('a',{className:'btn',href:`edit.html?id=${encodeURIComponent(r.ID)}`},'Bearbeiten'),
+            el('a',{className:'btn ghost',href:`find.html?q=${encodeURIComponent(r.Name||'')}`},'In Suche öffnen')
+          ))
+        );
+        tr.addEventListener('click',()=>showDetails(r));
+        rowsEl.append(tr);
+      });
+      countEl.textContent = `${state.filtered.length} Treffer`;
+      drawPager();
+    }
+
+    function drawPager(){
+      const {pageSize, filtered} = state; pagerEl.innerHTML=''; if(pageSize<=0) return;
+      const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      const mk = (p,label=String(p))=>{
+        const b = el('button',{className:'btn'+(p===state.page?' primary':''),textContent:label});
+        b.addEventListener('click',()=>{ state.page=p; drawTablePage(); window.scrollTo({top:0,behavior:'smooth'}); });
+        return b;
+      };
+      pagerEl.append(mk(Math.max(1,state.page-1),'‹'), ...Array.from({length:pages},(_,i)=>mk(i+1)), mk(Math.min(pages,state.page+1),'›'));
+    }
+
+    function showDetails(r){
+  $('#details').innerHTML = `
+    <div class="kv">
+      <div class="kv-key">ID</div><div class="kv-val">${r.ID}</div>
+      <div class="kv-key">Name</div><div class="kv-val">${r.Name||'—'}</div>
+      <div class="kv-key">Email</div><div class="kv-val">${r.Email||'—'}</div>
+      <div class="kv-key">Adresse</div><div class="kv-val">${r.StreetNr||'—'}</div>
+      <div class="kv-key">PLZ / Ort</div><div class="kv-val">${r.ZIP||'—'} ${r.City||''}</div>
+      <div class="kv-key">Land</div><div class="kv-val">${r.Country||'—'}</div>
+    </div>`;
+}
+
+
+    function sortBy(arr,key,dir){ return [...arr].sort((a,b)=>{ const va=(a[key]??'').toString().toLowerCase(), vb=(b[key]??'').toString().toLowerCase(); const d=va>vb?1:va<vb?-1:0; return dir==='asc'?d:-d; }); }
+    function applyFilters(){
+      const q=$('#fQ').value.trim().toLowerCase();
+      const rows = state.all.filter(r=>!q || [r.ID,r.Name,r.Email,r.StreetNr,r.ZIP,r.City,r.Country].map(x=>String(x||'').toLowerCase()).join(' ').includes(q));
+      state.filtered = sortBy(rows, state.sort.key, state.sort.dir); state.page=1; drawTablePage();
+    }
+
+    $$('th[data-sort]').forEach(th=>{
+      th.style.cursor='pointer';
+      th.addEventListener('click',()=>{ const k=th.dataset.sort; state.sort={key:k,dir:(state.sort.key===k && state.sort.dir==='asc')?'desc':'asc'}; applyFilters(); });
+    });
+
+    async function load(){
+      try{
+        setStatus('Lade CustomerView…');
+        rowsEl.innerHTML=''; rowsEl.append(skeletonRows(8,8));
+        const view = await API.get('CustomerView');
+        state.all = Array.isArray(view) ? view : (view?.resources ?? []);
+        setStatus('Fertig.'); applyFilters();
+      }catch(e){
+        setStatus(String(e.message)); rowsEl.innerHTML=''; toast('Fehler beim Laden der Übersicht.','error');
+      }
+    }
+
+    $('#reload').addEventListener('click', load);
+    $('#fQ').addEventListener('input', debounce(applyFilters, 200));
+    $('#pageSize').value = String(state.pageSize);
+    $('#pageSize').addEventListener('change', e=>{ state.pageSize = Number(e.target.value); storage.set('pageSize', state.pageSize); drawTablePage(); });
+    $('#reset').addEventListener('click', ()=>{ $('#fQ').value=''; applyFilters(); });
+
+    // Details ein/aus
+    const detailsCard = $('#detailsCard');
+let detailsCollapsed = false;
+$('#toggleDetails').addEventListener('click', ()=>{
+  detailsCollapsed = !detailsCollapsed;
+  detailsCard.classList.toggle('collapsed', detailsCollapsed);
+  $('#toggleDetails').textContent = detailsCollapsed ? '+' : '–';
+});
+
+
+    load();
+  </script>
+</body>
+</html>
